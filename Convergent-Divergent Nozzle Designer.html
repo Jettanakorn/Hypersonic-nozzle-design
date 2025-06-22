@@ -405,12 +405,18 @@
                 </div>
                 
                 <div class="export-options">
-                    <button id="exportCSV" class="btn-outline">Export Contour Data (CSV)</button>
-                    <button id="exportPNG" class="btn-outline">Export as Image</button>
+                    <button id="exportContourCSV" class="btn-outline">Export Contour Data (CSV)</button>
+                    <button id="exportContourImage" class="btn-outline">Export as Image</button>
                 </div>
                 
                 <div class="mach-chart-container">
                     <canvas id="machChart"></canvas>
+                </div>
+                
+                <!-- New Export Buttons for Mach Chart -->
+                <div class="export-options">
+                    <button id="exportMachCSV" class="btn-outline">Export Mach Data (CSV)</button>
+                    <button id="exportMachImage" class="btn-outline">Export Mach Chart as Image</button>
                 </div>
             </div>
             
@@ -503,7 +509,7 @@
     
     <footer>
         <div class="container">
-            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft</p>
+            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft | Updated: Sunday, June 22, 2025, 11:12 AM +07</p>
         </div>
     </footer>
     
@@ -513,8 +519,10 @@
         // DOM Elements
         const calculateBtn = document.getElementById('calculateBtn');
         const resetBtn = document.getElementById('resetBtn');
-        const exportCSV = document.getElementById('exportCSV');
-        const exportPNG = document.getElementById('exportPNG');
+        const exportContourCSV = document.getElementById('exportContourCSV');
+        const exportContourImage = document.getElementById('exportContourImage');
+        const exportMachCSV = document.getElementById('exportMachCSV');
+        const exportMachImage = document.getElementById('exportMachImage');
         const tabs = document.querySelectorAll('.tab');
         
         // Initialize Charts
@@ -529,8 +537,10 @@
         // Event Listeners
         calculateBtn.addEventListener('click', calculateNozzle);
         resetBtn.addEventListener('click', resetToDefaults);
-        exportCSV.addEventListener('click', exportContourData);
-        exportPNG.addEventListener('click', exportAsImage);
+        exportContourCSV.addEventListener('click', () => exportData('contour'));
+        exportContourImage.addEventListener('click', () => exportImage('contour'));
+        exportMachCSV.addEventListener('click', () => exportData('mach'));
+        exportMachImage.addEventListener('click', () => exportImage('mach'));
         
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -886,54 +896,70 @@
             });
         }
         
-        function exportContourData() {
-            const rows = document.querySelectorAll('#contourData tr');
-            if (rows.length === 0 || rows[0].textContent.includes('No data')) {
-                showNotification('No contour data to export', 'error');
-                return;
+        function exportData(type) {
+            let data, filename;
+            if (type === 'contour') {
+                const rows = document.querySelectorAll('#contourData tr');
+                if (rows.length === 0 || rows[0].textContent.includes('No data')) {
+                    showNotification('No contour data to export', 'error');
+                    return;
+                }
+                let csvContent = "Point,X (cm),Y (cm),Mach\n";
+                rows.forEach((row) => {
+                    const cells = row.querySelectorAll('td');
+                    csvContent += `${cells[0].textContent},${cells[1].textContent},${cells[2].textContent},${cells[3].textContent}\n`;
+                });
+                filename = 'nozzle_contour.csv';
+                data = csvContent;
+            } else if (type === 'mach') {
+                if (!machChart) {
+                    showNotification('No Mach data to export', 'error');
+                    return;
+                }
+                const xValues = machChart.data.labels;
+                const machValues = machChart.data.datasets[0].data;
+                let csvContent = "X (cm),Mach\n";
+                xValues.forEach((x, index) => {
+                    csvContent += `${x},${machValues[index]}\n`;
+                });
+                filename = 'mach_distribution.csv';
+                data = csvContent;
             }
             
-            let csvContent = "Point,X (cm),Y (cm),Mach\n";
-            rows.forEach((row, index) => {
-                const cells = row.querySelectorAll('td');
-                csvContent += `${cells[0].textContent},${cells[1].textContent},${cells[2].textContent},${cells[3].textContent}\n`;
-            });
-            
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.setAttribute('href', url);
-            link.setAttribute('download', 'nozzle_contour.csv');
+            link.setAttribute('download', filename);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             
-            showNotification('Contour data exported as CSV', 'success');
+            showNotification(`${type === 'contour' ? 'Contour' : 'Mach'} data exported as CSV`, 'success');
         }
         
-        function exportAsImage() {
-            if (!nozzleChart && !machChart) {
-                showNotification('No charts to export', 'error');
-                return;
-            }
-            
-            // Prompt user to choose which chart to export
-            const choice = prompt('Enter "contour" to export the nozzle contour or "mach" to export the Mach number chart:').toLowerCase();
-            
+        function exportImage(type) {
             let chart, filename;
-            if (choice === 'contour' && nozzleChart) {
+            if (type === 'contour') {
+                if (!nozzleChart) {
+                    showNotification('Nozzle chart not available for export', 'error');
+                    return;
+                }
                 chart = nozzleChart;
                 filename = 'nozzle_contour.png';
-            } else if (choice === 'mach' && machChart) {
+            } else if (type === 'mach') {
+                if (!machChart) {
+                    showNotification('Mach chart not available for export', 'error');
+                    return;
+                }
                 chart = machChart;
                 filename = 'mach_distribution.png';
-            } else {
-                showNotification('Invalid choice or chart not available', 'error');
-                return;
             }
             
-            const image = chart.toBase64Image('image/png', 1);
+            // Ensure chart is fully rendered before export
+            chart.update();
+            const image = chart.toBase64Image('image/png', 1.0);
             const link = document.createElement('a');
             link.href = image;
             link.download = filename;
@@ -941,7 +967,7 @@
             link.click();
             document.body.removeChild(link);
             
-            showNotification(`${choice === 'contour' ? 'Nozzle contour' : 'Mach number chart'} exported as PNG`, 'success');
+            showNotification(`${type === 'contour' ? 'Nozzle contour' : 'Mach number chart'} exported as PNG`, 'success');
         }
         
         function showNotification(message, type) {

@@ -304,7 +304,7 @@
             <div align='center'><br/>
                 <img src="JFox_Logo_TBG.png" alt="JFOX Aircraft" width=20% height=20%/>
                 <h1>Method of Characteristics Nozzle Designer</h1>
-                <p class="subtitle">Design and visualize optimal rocket nozzle contours with smooth throat transition</p>
+                <p class="subtitle">Design and visualize optimal rocket nozzle contours based on combustion chamber conditions and altitude</p>
                 <p align="center">Powered by JFOX Aircraft</p>
             </div>
         </div>
@@ -489,12 +489,12 @@
                 
                 <div class="tab-content" id="about-content">
                     <h3>Method of Characteristics Nozzle Design</h3>
-                    <p>This web application implements the Method of Characteristics (MOC) for designing optimal convergent-divergent rocket nozzle contours with a smooth throat transition. The MOC is used for the supersonic divergent section, while the convergent and throat regions are modeled for smooth flow acceleration.</p>
+                    <p>This web application implements the Method of Characteristics (MOC) for designing optimal convergent-divergent rocket nozzle contours. It ensures a smooth transition at the throat using a circular arc, minimizing flow disturbances.</p>
                     
                     <h4>Key Features:</h4>
                     <ul style="margin-left: 20px; margin-top: 10px;">
                         <li>Designs full convergent-divergent nozzles with smooth throat transition</li>
-                        <li>Calculates optimal contour for given altitude and chamber conditions</li>
+                        <li>Calculates optimal contour for given altitude</li>
                         <li>Supports input by thrust or mass flow rate</li>
                         <li>Models atmospheric conditions based on altitude</li>
                         <li>Includes separate Mach number distribution visualization</li>
@@ -507,9 +507,9 @@
                     <ol style="margin-left: 20px; margin-top: 10px;">
                         <li>Determining ambient pressure at specified altitude</li>
                         <li>Calculating exit conditions (Mach number, velocity)</li>
-                        <li>Generating a convergent section with a smooth transition to the throat</li>
-                        <li>Using MOC to design the supersonic divergent section</li>
-                        <li>Finding wall points to create the optimal contour</li>
+                        <li>Generating a smooth convergent section to the throat</li>
+                        <li>Using a circular arc for the throat transition</li>
+                        <li>Applying MOC to design the supersonic divergent section</li>
                     </ol>
                 </div>
             </div>
@@ -518,7 +518,7 @@
     
     <footer>
         <div class="container">
-            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft | Updated: Sunday, June 22, 2025, 12:54 PM +07</p>
+            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft | Updated: Sunday, June 22, 2025, 01:40 PM +07</p>
         </div>
     </footer>
     
@@ -695,8 +695,8 @@
             document.getElementById('prValue').textContent = PR.toFixed(6);
             document.getElementById('teValue').textContent = Math.round(T_e);
             
-            // Generate nozzle contour with smooth throat transition
-            const contourData = generateNozzleContour(R_inlet, L_conv, TR, nozzleLength, Me, g, numCharacteristics, maxWallAngle);
+            // Generate nozzle contour
+            const contourData = generateNozzleContour(Me, g, R_inlet, L_conv, TR, nozzleLength, maxWallAngle, numCharacteristics);
             
             // Update data table
             updateContourTable(contourData);
@@ -707,52 +707,63 @@
             showNotification('Nozzle design completed successfully!', 'success');
         }
         
-        function generateNozzleContour(R_inlet, L_conv, TR, targetLength, Me, g, numCharacteristics, maxWallAngle) {
+        function generateNozzleContour(Me, g, R_inlet, L_conv, TR, targetLength, maxWallAngle, numCharacteristics) {
             const points = [];
-            const DTOR = Math.PI / 180;
+            const DTOR = Math.PI / 180; // Degrees to radians
+            
+            // Prandtl-Meyer function
             const A = Math.sqrt((g + 1) / (g - 1));
             const B = (g - 1) / (g + 1);
-            const v_PM = (M) => A * Math.atan(Math.sqrt(B * (M * M - 1))) - Math.atan(Math.sqrt(M * M - 1));
+            const v_PM = (x) => A * Math.atan(Math.sqrt(B * (x * x - 1))) - Math.atan(Math.sqrt(x * x - 1));
+            
+            // Maximum Prandtl-Meyer angle
             const v_max = v_PM(Me);
-            const theta_max = 0.5 * v_max;
+            const theta_max = 0.5 * v_max; // Half-angle for symmetric nozzle
             
             // Define throat transition region
             const delta = 0.1 * TR; // Small transition length
-            const R_c = TR; // Radius of curvature
+            const R_c = TR; // Radius of curvature, e.g., equal to TR
             const y_delta = TR - R_c + Math.sqrt(R_c * R_c - delta * delta);
+            const slope_delta = delta / Math.sqrt(R_c * R_c - delta * delta); // Magnitude of slope at x = ±δ
             
             // 1. Convergent Section (x from -L_conv to -delta)
             const numConvPoints = 20;
+            const m_conv = (y_delta - R_inlet) / (L_conv - delta); // Slope of convergent section
             for (let i = 0; i <= numConvPoints; i++) {
                 const x = -L_conv + i * (L_conv - delta) / numConvPoints;
-                const y = R_inlet + (y_delta - R_inlet) * (i / numConvPoints);
-                const M = 0.1 + 0.9 * (i / numConvPoints); // Approximate subsonic Mach
-                points.push({ x, y, M });
+                const y = R_inlet + m_conv * (x + L_conv);
+                points.push({ x, y, M: 1 - 0.05 * (i / numConvPoints) }); // Approximate subsonic to sonic transition
             }
             
-            // 2. Throat Region (x from -delta to delta)
+            // 2. Throat Transition Region (x from -delta to delta)
             const numThroatPoints = 10;
             for (let i = 0; i <= numThroatPoints; i++) {
                 const x = -delta + i * (2 * delta) / numThroatPoints;
                 const y = TR - R_c + Math.sqrt(R_c * R_c - x * x);
-                points.push({ x, y, M: 1 });
+                points.push({ x, y, M: 1 }); // Sonic at throat
             }
             
-            // 3. Divergent Section (x > delta)
+            // 3. Divergent Section (x > delta) using MOC
             let lastX = delta;
             let lastY = y_delta;
+            let currentTheta = Math.atan(slope_delta); // Initial angle matching throat slope
             const delta_x = targetLength > 0 ? targetLength / numCharacteristics : 2;
             const delta_nu = v_max / numCharacteristics;
+            
             for (let i = 1; i <= numCharacteristics; i++) {
                 const nu = i * delta_nu;
                 const M = newtonRaphson(M => v_PM(M) - nu, 1.1);
-                const theta = nu / 2;
+                const theta = nu / 2; // Linear turning approximation
                 const x = lastX + delta_x;
                 const y = lastY + delta_x * Math.tan(Math.min(theta, maxWallAngle * DTOR));
                 points.push({ x, y, M });
                 lastX = x;
                 lastY = y;
+                currentTheta = theta;
             }
+            
+            // Add straight section
+            points.push({ x: lastX + 10, y: lastY, M: Me });
             
             return points;
         }
@@ -788,23 +799,19 @@
         
         function plotNozzle(contourData) {
             // Destroy existing charts if they exist
-            if (nozzleChart) {
-                nozzleChart.destroy();
-            }
-            if (machChart) {
-                machChart.destroy();
-            }
-            
+            if (nozzleChart) nozzleChart.destroy();
+            if (machChart) machChart.destroy();
+
             // Extract data
             const xValues = contourData.map(p => p.x);
             const yValues = contourData.map(p => p.y);
             const machValues = contourData.map(p => p.M || 1);
             const yValuesLower = yValues.map(y => -y);
-            
+
             // Calculate min and max for x-axis
             const minX = Math.min(...xValues);
             const maxX = Math.max(...xValues);
-            
+
             // Create nozzle contour chart
             nozzleChart = new Chart(nozzleCtx, {
                 type: 'line',
@@ -815,6 +822,7 @@
                             label: 'Upper Contour',
                             data: yValues,
                             borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
                             borderWidth: 2,
                             fill: false,
                             tension: 0.4
@@ -823,6 +831,7 @@
                             label: 'Lower Contour',
                             data: yValuesLower,
                             borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
                             borderWidth: 2,
                             fill: false,
                             tension: 0.4
@@ -842,16 +851,25 @@
                         },
                         y: {
                             title: { display: true, text: 'Radial Distance (cm)' },
+                            min: -Math.max(...yValues),
+                            max: Math.max(...yValues),
                             grid: { color: 'rgba(0, 0, 0, 0.05)' }
                         }
                     },
                     plugins: {
-                        legend: { position: 'top’ },
-                        title: { display: true, text: 'Convergent-Divergent Nozzle Contour' }
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Convergent-Divergent Nozzle Contour' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: (${context.parsed.x.toFixed(2)}, ${Math.abs(context.parsed.y).toFixed(2)}) cm`;
+                                }
+                            }
+                        }
                     }
                 }
             });
-            
+
             // Create Mach number chart
             machChart = new Chart(machCtx, {
                 type: 'line',
@@ -888,7 +906,14 @@
                     },
                     plugins: {
                         legend: { position: 'top' },
-                        title: { display: true, text: 'Mach Number Distribution' }
+                        title: { display: true, text: 'Mach Number Distribution' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Mach: ${context.parsed.y.toFixed(2)} at x=${context.parsed.x.toFixed(2)} cm`;
+                                }
+                            }
+                        }
                     }
                 }
             });

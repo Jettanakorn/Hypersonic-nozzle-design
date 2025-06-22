@@ -1,382 +1,888 @@
-// DOM Elements
-const calculateBtn = document.getElementById('calculateBtn');
-const resetBtn = document.getElementById('resetBtn');
-const exportCSV = document.getElementById('exportCSV');
-const exportPNG = document.getElementById('exportPNG');
-const tabs = document.querySelectorAll('.tab');
-
-// Initialize Chart
-const ctx = document.getElementById('nozzleChart').getContext('2d');
-let nozzleChart;
-
-// Initialize with default values
-resetToDefaults();
-
-// Event Listeners
-calculateBtn.addEventListener('click', calculateNozzle);
-resetBtn.addEventListener('click', resetToDefaults);
-exportCSV.addEventListener('click', exportContourData);
-exportPNG.addEventListener('click', exportAsImage);
-
-tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        const tabId = tab.getAttribute('data-tab');
-        document.getElementById(`${tabId}-content`).classList.add('active');
-    });
-});
-
-// Functions
-function resetToDefaults() {
-    document.getElementById('p1').value = '2000000';
-    document.getElementById('T1').value = '3500';
-    document.getElementById('FT').value = '10000';
-    document.getElementById('m_dot').value = '0';
-    document.getElementById('ALT').value = '10000';
-    document.getElementById('g').value = '1.2';
-    document.getElementById('R').value = '355';
-    document.getElementById('TR').value = '10';
-
-    // Clear results
-    document.getElementById('meValue').textContent = '-';
-    document.getElementById('veValue').textContent = '-';
-    document.getElementById('mdotValue').textContent = '-';
-    document.getElementById('ftValue').textContent = '-';
-    document.getElementById('p0Value').textContent = '-';
-    document.getElementById('t0Value').textContent = '-';
-    document.getElementById('prValue').textContent = '-';
-    document.getElementById('teValue').textContent = '-';
-
-    // Clear chart if exists
-    if (nozzleChart) {
-        nozzleChart.destroy();
-    }
-
-    // Clear data table
-    document.getElementById('contourData').innerHTML = '<tr><td colspan="3" style="text-align:center">No data available. Run calculation first.</td></tr>';
-
-    showNotification('Form has been reset to default values', 'success');
-}
-
-function calculateNozzle() {
-    // Get input values
-    const p1 = parseFloat(document.getElementById('p1').value);
-    const T1 = parseFloat(document.getElementById('T1').value);
-    let FT = parseFloat(document.getElementById('FT').value);
-    let m_dot = parseFloat(document.getElementById('m_dot').value);
-    const ALT = parseFloat(document.getElementById('ALT').value);
-    const g = parseFloat(document.getElementById('g').value);
-    const R = parseFloat(document.getElementById('R').value);
-    const TR = parseFloat(document.getElementById('TR').value) / 100; // Convert cm to m
-
-    // Validate inputs
-    if ([p1, T1, ALT, g, R, TR].some(isNaN)) {
-        showNotification('Please enter valid numbers for all parameters', 'error');
-        return;
-    }
-
-    if (FT === 0 && m_dot === 0) {
-        showNotification('You must specify either thrust or mass flow rate', 'error');
-        return;
-    }
-
-    // Calculate atmospheric conditions
-    let T_amb, p_o;
-    if (ALT > 11000 && ALT < 25000) {
-        T_amb = -56.46;
-        p_o = 1000 * (22.65 * Math.exp(1.73 - 0.000157 * ALT));
-    } else if (ALT >= 25000) {
-        T_amb = -131.21 + 0.00299 * ALT;
-        p_o = 1000 * (2.488 * Math.pow((T_amb + 273.1) / 216.6, -11.388));
-    } else {
-        T_amb = 15.04 - 0.00649 * ALT;
-        p_o = 1000 * (101.29 * Math.pow((T_amb + 273.1) / 288.08, 5.256));
-    }
-
-    // Calculate throat conditions
-    const p_t = p1 * Math.pow(2 / (g + 1), g / (g - 1));
-    const T_t = T1 * (2 / (g + 1));
-    const rho_t = p_t / (R * T_t);
-    const a_t = Math.sqrt(g * R * T_t);
-    const A_t = Math.PI * TR * TR;
-
-    // Calculate mass flow rate or thrust
-    if (m_dot === 0) {
-        const v_e = Math.sqrt((2 * g * R * T1) / (g - 1) * (1 - Math.pow(p_o / p1, (g - 1) / g)));
-        m_dot = FT / (v_e + (p_t - p_o) * A_t / m_dot);
-    } else if (FT === 0) {
-        const v_e = Math.sqrt((2 * g * R * T1) / (g - 1) * (1 - Math.pow(p_o / p1, (g - 1) / g)));
-        FT = m_dot * v_e + (p_t - p_o) * A_t;
-    }
-
-    // Calculate exit conditions
-    const PR = p_o / p1;
-    const T_e = T1 * Math.pow(PR, (g - 1) / g);
-    const a_e = Math.sqrt(g * R * T_e);
-    const v_e = Math.sqrt((2 * g * R * T1) / (g - 1) * (1 - Math.pow(PR, (g - 1) / g)));
-    const Me = v_e / a_e;
-
-    // Display results
-    document.getElementById('meValue').textContent = Me.toFixed(2);
-    document.getElementById('veValue').textContent = Math.round(v_e);
-    document.getElementById('mdotValue').textContent = m_dot.toFixed(3);
-    document.getElementById('ftValue').textContent = Math.round(FT);
-    document.getElementById('p0Value').textContent = Math.round(p_o);
-    document.getElementById('t0Value').textContent = '0Value.toFixed(2);
-    document.getElementById('prValue').textContent = PR.toFixed(6);
-    document.getElementById('teValue').textContent = Math.round(T_e);
-
-    // Generate nozzle contour
-    const contourData = generateNozzleContour(Me, g, T1, p1, p_o, R, TR, m_dot);
-
-    // Update data table
-    updateContourTable(contourData);
-
-    // Plot nozzle
-    plotNozzle(contourData);
-
-    showNotification('Nozzle design completed successfully!', 'success');
-}
-
-function generateNozzleContour(Me, g, T1, p1, p_o, R, TR, m_dot) {
-    const RTOD = 180 / Math.PI;
-    const DTOR = Math.PI / 180;
-    const points = [];
-
-    // Prandtl-Meyer function
-    const PM = (M) => {
-        const A = Math.sqrt((g + 1) / (g - 1));
-        const B = (g - 1) / (g + 1);
-        return A * Math.atan(Math.sqrt(B * (M * M - 1))) - Math.atan(Math.sqrt(M * M - 1));
-    };
-
-    // Convergent section
-    const convergentAngle = 30 * DTOR; // 30° half-angle
-    const A_t = Math.PI * TR * TR;
-    const p_t = p1 * Math.pow(2 / (g + 1), g / (g - 1));
-    const T_t = T1 * (2 / (g + 1));
-    const rho_t = p_t / (R * T_t);
-    const v_t = Math.sqrt(g * R * T_t);
-    const A_c = m_dot / (rho_t * v_t * 0.2)); // Approximate chamber area (Mach 0.2 at chamber)
-    const R_c = Math.sqrt(A_c / Math.PI);
-
-    // Convergent section points (assume linear taper)
-    const L_con = (R_c - TR) / Math.tan(convergentAngle);
-    const n_con = 10; // Number of points in convergent section
-    for (let i = 0; i <= n_con; i++) {
-        const t = i / n_con;
-        const x = -L_con * (1 - t);
-        const y = TR + (R_c - TR) * (1 - t);
-        points.push({ x: x * 100, y: y * 100 }); // Convert m to cm
-    }
-
-    // Throat point
-    points.push({ x: 0, y: TR * 100 });
-
-    // Divergent section (Method of Characteristics)
-    const v_max = PM(Me);
-    const theta_max = v_max / 2; // Max turning angle
-    const n_div = 60; // Number of points in divergent section
-    let x = 0, y = TR;
-    let theta = 0, nu = 0;
-    const delta_theta = theta_max / n_div;
-
-    for (let i = 1; i <= n_div; i++) {
-        // Simplified MOC: assume linear increase in flow angle
-        theta += delta_theta;
-        nu = theta; // Ideal expansion
-        const M_local = solveMachFromPM(nu, g, PM);
-        const mu = Math.asin(1 / M_local);
-        const dx = 0.01; // Small axial step (m)
-        x += dx / Math.cos(theta);
-        y += dx * Math.tan(theta);
-        points.push({ x: x * 100, y: y * 100 }); // Convert m to cm
-    });
-
-    return points;
-}
-
-function solveMachFromPM(nu) {
-    target, g, PM, tolerance = 1e-6) {
-    // Numerical solver for Mach number given Prandtl-Meyer angle
-    let M_low = 1, M_high = 100;
-    let M_mid;
-    while (M_high - M_low > tolerance) {
-        M_mid = (M_low + M_low + M_high) / 2;
-        const nu_calc = PM(M_mid);
-        if (nu_calc < target) {
-            M_low = M_mid;
-        } else {
-            M_high = M_mid;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nozzle Designer - Method of Characteristics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <style>
+        :root {
+            --primary: #623970;
+            --secondary: #a61ed4;
+            --accent: #e74c3c;
+            --light: #ecf0f1;
+            --dark: #34495e;
+            --success: #2ecc71;
         }
-    }
-    return M_mid;
-}
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: var(--dark);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            margin-bottom: 2rem;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        
+        @media (max-width: 900px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+        }
+        
+        .card-title {
+            font-size: 1.4rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid var(--secondary);
+            color: var(--primary);
+        }
+        
+        .input-group {
+            margin-bottom: 1.2rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--dark);
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--secondary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        button {
+            flex: 1;
+            padding: 0.9rem;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: var(--secondary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-secondary {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #c0392b;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--secondary);
+            color: var(--secondary);
+        }
+        
+        .btn-outline:hover {
+            background: var(--secondary);
+            color: white;
+        }
+        
+        .chart-container {
+            height: 400px;
+            margin-top: 1rem;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        .result-card {
+            background: var(--light);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .result-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--secondary);
+            margin-top: 0.5rem;
+        }
+        
+        .result-label {
+            font-size: 0.9rem;
+            color: var(--dark);
+        }
+        
+        .export-options {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .tab-container {
+            margin-top: 1.5rem;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 1rem;
+        }
+        
+        .tab {
+            padding: 0.8rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .tab.active {
+            border-bottom: 3px solid var(--secondary);
+            color: var(--secondary);
+            font-weight: 600;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .data-table th, .data-table td {
+            padding: 0.8rem;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .data-table th {
+            background: var(--light);
+            font-weight: 600;
+        }
+        
+        .data-table tr:hover {
+            background: #f9f9f9;
+        }
+        
+        footer {
+            margin-top: 3rem;
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--dark);
+            font-size: 0.9rem;
+            border-top: 1px solid #ddd;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem;
+            border-radius: 5px;
+            color: white;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateX(200%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background: var(--success);
+        }
+        
+        .notification.error {
+            background: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div align='center'><br/>
+                <img src="JFox_Logo_TBG.png" alt="JFOX Aircraft" width=20% height=20%/>
+                <h1>Method of Characteristics Nozzle Designer</h1>
+                <p class="subtitle">Design and visualize optimal rocket nozzle contours based on combustion chamber conditions and altitude</p>
+                <p align="center">Powered by JFOX Aircraft</p>
+            </div>
+        </div>
+    </header>
+    
+    <div class="container">
+        <div class="content">
+            <!-- Input Panel -->
+            <div class="card">
+                <h2 class="card-title">Design Parameters</h2>
+                
+                <div class="input-group">
+                    <label for="p1">Chamber Pressure (Pa)</label>
+                    <input type="number" id="p1" value="2000000" min="0" step="1000">
+                </div>
+                
+                <div class="input-group">
+                    <label for="T1">Chamber Temperature (K)</label>
+                    <input type="number" id="T1" value="3500" min="0" step="50">
+                </div>
+                
+                <div class="input-group">
+                    <label for="FT">Desired Thrust (N) <span style="font-weight:normal">(set to 0 to use mass flow)</span></label>
+                    <input type="number" id="FT" value="10000" min="0" step="100">
+                </div>
+                
+                <div class="input-group">
+                    <label for="m_dot">Mass Flow Rate (kg/s) <span style="font-weight:normal">(set to 0 to use thrust)</span></label>
+                    <input type="number" id="m_dot" value="0" min="0" step="0.1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="ALT">Altitude (m)</label>
+                    <input type="number" id="ALT" value="10000" min="0" step="100">
+                </div>
+                
+                <div class="input-group">
+                    <label for="g">Specific Heat Ratio (γ)</label>
+                    <input type="number" id="g" value="1.2" min="1" max="2" step="0.01">
+                </div>
+                
+                <div class="input-group">
+                    <label for="R">Gas Constant (J/kg·K)</label>
+                    <input type="number" id="R" value="355" min="0" step="1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="TR">Throat Radius (cm)</label>
+                    <input type="number" id="TR" value="10" min="0.1" step="0.1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="nozzleLength">Target Nozzle Length (cm) <span style="font-weight:normal">(set to 0 for minimum length)</span></label>
+                    <input type="number" id="nozzleLength" value="0" min="0" step="0.1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="maxWallAngle">Maximum Wall Angle (deg)</label>
+                    <input type="number" id="maxWallAngle" value="15" min="5" max="30" step="1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="numCharacteristics">Number of Characteristics</label>
+                    <input type="number" id="numCharacteristics" value="60" min="10" max="200" step="10">
+                </div>
+                
+                <div class="btn-group">
+                    <button id="calculateBtn" class="btn-primary">Calculate Nozzle</button>
+                    <button id="resetBtn" class="btn-outline">Reset</button>
+                </div>
+            </div>
+            
+            <!-- Output Panel -->
+            <div class="card">
+                <h2 class="card-title">Nozzle Visualization</h2>
+                
+                <div class="chart-container">
+                    <canvas id="nozzleChart"></canvas>
+                </div>
+                
+                <div class="results-grid">
+                    <div class="result-card">
+                        <div class="result-label">Exit Mach Number</div>
+                        <div id="meValue" class="result-value">-</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-label">Exit Velocity (m/s)</div>
+                        <div id="veValue" class="result-value">-</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-label">Mass Flow Rate (kg/s)</div>
+                        <div id="mdotValue" class="result-value">-</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-label">Thrust (N)</div>
+                        <div id="ftValue" class="result-value">-</div>
+                    </div>
+                </div>
+                
+                <div class="export-options">
+                    <button id="exportCSV" class="btn-outline">Export Contour Data (CSV)</button>
+                    <button id="exportPNG" class="btn-outline">Export as Image</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card tab-container">
+            <div class="tabs">
+                <div class="tab active" data-tab="contour">Nozzle Contour Data</div>
+                <div class="tab" data-tab="atm">Atmospheric Conditions</div>
+                <div class="tab" data-tab="about">About</div>
+            </div>
+            
+            <div class="tab-content active" id="contour-content">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Point #</th>
+                            <th>X Position (cm)</th>
+                            <th>Y Position (cm)</th>
+                            <th>Mach Number</th>
+                        </tr>
+                    </thead>
+                    <tbody id="contourData">
+                        <tr><td colspan="4" style="text-align:center">No data available. Run calculation first.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="tab-content" id="atm-content">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Value</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Ambient Pressure (Pa)</td>
+                            <td id="p0Value">-</td>
+                            <td>Atmospheric pressure at specified altitude</td>
+                        </tr>
+                        <tr>
+                            <td>Ambient Temperature (°C)</td>
+                            <td id="t0Value">-</td>
+                            <td>Atmospheric temperature at specified altitude</td>
+                        </tr>
+                        <tr>
+                            <td>Pressure Ratio</td>
+                            <td id="prValue">-</td>
+                            <td>p<sub>o</sub>/p<sub>1</sub></td>
+                        </tr>
+                        <tr>
+                            <td>Exit Temperature (K)</td>
+                            <td id="teValue">-</td>
+                            <td>Temperature at nozzle exit</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="tab-content" id="about-content">
+                <h3>Method of Characteristics Nozzle Design</h3>
+                <p>This web application implements the Method of Characteristics (MOC) for designing optimal rocket nozzle contours. The MOC is a technique used in supersonic flow design to minimize energy losses and maximize thrust.</p>
+                
+                <h4>Key Features:</h4>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>Designs nozzles for specified combustion chamber conditions</li>
+                    <li>Calculates optimal contour for given altitude</li>
+                    <li>Supports input by thrust or mass flow rate</li>
+                    <li>Models atmospheric conditions based on altitude</li>
+                    <li>Includes Mach number distribution visualization</li>
+                    <li>Supports customizable nozzle length and wall angle constraints</li>
+                    <li>Exports contour data for further analysis</li>
+                </ul>
+                
+                <h4>How it Works:</h4>
+                <p>The algorithm calculates the nozzle contour by:</p>
+                <ol style="margin-left: 20px; margin-top: 10px;">
+                    <li>Determining ambient pressure at specified altitude</li>
+                    <li>Calculating exit conditions (Mach number, velocity)</li>
+                    <li>Computing Prandtl-Meyer expansion angles</li>
+                    <li>Generating characteristic lines using MOC</li>
+                    <li>Finding wall points to create the optimal contour</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    
+    <footer>
+        <div class="container">
+            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft</p>
+        </div>
+    </footer>
+    
+    <div class="notification" id="notification"></div>
 
-function updateContourTable(contourData) {
-    const tableBody = document.getElementById('contourData');
-    tableBody.innerHTML = '';
-
-    contourData.forEach((point, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <tr>
-            <td>${index + 1}</td>
-            <td>${point.x.toFixed(2)}</td>
-            <td>${point.y.toFixed(2)}</td>
-        `;
-        tableBody.appendChild(row);
-    });
-}
-
-function plotNozzle(contourData) {
-    // Destroy existing chart
-    if (nozzleChart) {
-        nozzleChart.destroy();
-    }
-
-    // Extract x and y coordinates
-    const xValues = contourData.map(p => p.x);
-    const yValues = contourData.map(p => p.y);
-
-    // Create symmetric lower contour
-    const yValuesLower = yValues.map(y => -y);
-
-    // Create chart
-    nozzleChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: xValues,
-            datasets: [
-                {
-                    label: 'Upper Contour',
-                    data: yValues,
-                    borderColor: '#3498db',
-                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4
+    <script>
+        // DOM Elements
+        const calculateBtn = document.getElementById('calculateBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const exportCSV = document.getElementById('exportCSV');
+        const exportPNG = document.getElementById('exportPNG');
+        const tabs = document.querySelectorAll('.tab');
+        
+        // Initialize Chart
+        const ctx = document.getElementById('nozzleChart').getContext('2d');
+        let nozzleChart;
+        
+        // Initialize with default values
+        resetToDefaults();
+        
+        // Event Listeners
+        calculateBtn.addEventListener('click', calculateNozzle);
+        resetBtn.addEventListener('click', resetToDefaults);
+        exportCSV.addEventListener('click', exportContourData);
+        exportPNG.addEventListener('click', exportAsImage);
+        
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                const tabId = tab.getAttribute('data-tab');
+                document.getElementById(`${tabId}-content`).classList.add('active');
+            });
+        });
+        
+        // Functions
+        function resetToDefaults() {
+            document.getElementById('p1').value = '2000000';
+            document.getElementById('T1').value = '3500';
+            document.getElementById('FT').value = '10000';
+            document.getElementById('m_dot').value = '0';
+            document.getElementById('ALT').value = '10000';
+            document.getElementById('g').value = '1.2';
+            document.getElementById('R').value = '355';
+            document.getElementById('TR').value = '10';
+            document.getElementById('nozzleLength').value = '0';
+            document.getElementById('maxWallAngle').value = '15';
+            document.getElementById('numCharacteristics').value = '60';
+            
+            // Clear results
+            document.getElementById('meValue').textContent = '-';
+            document.getElementById('veValue').textContent = '-';
+            document.getElementById('mdotValue').textContent = '-';
+            document.getElementById('ftValue').textContent = '-';
+            document.getElementById('p0Value').textContent = '-';
+            document.getElementById('t0Value').textContent = '-';
+            document.getElementById('prValue').textContent = '-';
+            document.getElementById('teValue').textContent = '-';
+            
+            // Clear chart if exists
+            if (nozzleChart) {
+                nozzleChart.destroy();
+            }
+            
+            // Clear data table
+            document.getElementById('contourData').innerHTML = '<tr><td colspan="4" style="text-align:center">No data available. Run calculation first.</td></tr>';
+            
+            showNotification('Form has been reset to default values', 'success');
+        }
+        
+        function calculateNozzle() {
+            // Get input values
+            const p1 = parseFloat(document.getElementById('p1').value);
+            const T1 = parseFloat(document.getElementById('T1').value);
+            let FT = parseFloat(document.getElementById('FT').value);
+            let m_dot = parseFloat(document.getElementById('m_dot').value);
+            const ALT = parseFloat(document.getElementById('ALT').value);
+            const g = parseFloat(document.getElementById('g').value);
+            const R = parseFloat(document.getElementById('R').value);
+            const TR = parseFloat(document.getElementById('TR').value);
+            const nozzleLength = parseFloat(document.getElementById('nozzleLength').value);
+            const maxWallAngle = parseFloat(document.getElementById('maxWallAngle').value);
+            const numCharacteristics = parseInt(document.getElementById('numCharacteristics').value);
+            
+            // Validate inputs
+            if ([p1, T1, ALT, g, R, TR, nozzleLength, maxWallAngle, numCharacteristics].some(isNaN)) {
+                showNotification('Please enter valid numbers for all parameters', 'error');
+                return;
+            }
+            if (p1 <= 0 || T1 <= 0 || TR <= 0) {
+                showNotification('Pressure, temperature, and throat radius must be positive', 'error');
+                return;
+            }
+            if (g < 1 || g > 2) {
+                showNotification('Specific heat ratio must be between 1 and 2', 'error');
+                return;
+            }
+            if (FT === 0 && m_dot === 0) {
+                showNotification('You must specify either thrust or mass flow rate', 'error');
+                return;
+            }
+            if (maxWallAngle < 5 || maxWallAngle > 30) {
+                showNotification('Maximum wall angle must be between 5 and 30 degrees', 'error');
+                return;
+            }
+            if (numCharacteristics < 10 || numCharacteristics > 200) {
+                showNotification('Number of characteristics must be between 10 and 200', 'error');
+                return;
+            }
+            
+            // Calculate atmospheric conditions
+            let T_amb, p_o;
+            if (ALT > 11000 && ALT < 25000) {
+                T_amb = -56.46;
+                p_o = 1000 * (22.65 * Math.exp(1.73 - 0.000157 * ALT));
+            } else if (ALT >= 25000) {
+                T_amb = -131.21 + 0.00299 * ALT;
+                p_o = 1000 * (2.488 * Math.pow((T_amb + 273.1) / 216.6, -11.388));
+            } else {
+                T_amb = 15.04 - 0.00649 * ALT;
+                p_o = 1000 * (101.29 * Math.pow((T_amb + 273.1) / 288.08, 5.256));
+            }
+            
+            // Calculate pressure ratio
+            const PR = p_o / p1;
+            const PR2 = Math.pow(PR, (g-1)/g);
+            const TT = (2 * g * R * T1) / (g-1);
+            
+            // Calculate exit velocity
+            const v_e = Math.sqrt(TT * (1 - PR2));
+            
+            // Calculate thrust or mass flow rate
+            if (m_dot === 0) {
+                m_dot = FT / v_e;
+            } else if (FT === 0) {
+                FT = m_dot * v_e;
+            }
+            
+            // Calculate exit conditions
+            const T_e = T1 * Math.pow(PR, (g-1)/g);
+            const a_e = Math.sqrt(g * R * T_e);
+            const Me = v_e / a_e;
+            
+            // Display results
+            document.getElementById('meValue').textContent = Me.toFixed(2);
+            document.getElementById('veValue').textContent = Math.round(v_e);
+            document.getElementById('mdotValue').textContent = m_dot.toFixed(2);
+            document.getElementById('ftValue').textContent = Math.round(FT);
+            document.getElementById('p0Value').textContent = Math.round(p_o);
+            document.getElementById('t0Value').textContent = T_amb.toFixed(2);
+            document.getElementById('prValue').textContent = PR.toFixed(6);
+            document.getElementById('teValue').textContent = Math.round(T_e);
+            
+            // Generate nozzle contour
+            const contourData = generateNozzleContour(Me, g, T1, TR);
+            
+            // Update data table
+            updateContourTable(contourData);
+            
+            // Plot nozzle
+            plotNozzle(contourData);
+            
+            showNotification('Nozzle design completed successfully!', 'success');
+        }
+        
+        function generateNozzleContour(Me, g, T1, TR) {
+            const RTOD = 180 / Math.PI;
+            const DTOR = Math.PI / 180;
+            const numCharacteristics = parseInt(document.getElementById('numCharacteristics').value);
+            const maxWallAngle = parseFloat(document.getElementById('maxWallAngle').value) * DTOR;
+            const targetLength = parseFloat(document.getElementById('nozzleLength').value);
+            
+            // Prandtl-Meyer function
+            const A = Math.sqrt((g + 1) / (g - 1));
+            const B = (g - 1) / (g + 1);
+            const v_PM = (x) => A * Math.atan(Math.sqrt(B * (x * x - 1))) - Math.atan(Math.sqrt(x * x - 1));
+            
+            // Maximum Prandtl-Meyer angle
+            const v_max = v_PM(Me);
+            const theta_max = 0.5 * v_max; // Half-angle for symmetric nozzle
+            
+            // Initialize points
+            const points = [{ x: 0, y: TR, M: 1 }]; // Throat point
+            const flowProperties = [{ x: 0, y: TR, M: 1, theta: 0, nu: 0 }];
+            
+            // Initial expansion fan
+            const delta_nu = v_max / numCharacteristics;
+            for (let i = 1; i <= numCharacteristics; i++) {
+                const nu = i * delta_nu;
+                const M = newtonRaphson(M => v_PM(M) - nu, 1.1); // Solve for Mach number
+                const theta = nu / 2; // Simplified linear turning
+                const mu = Math.asin(1 / M);
+                flowProperties.push({ x: 0, y: TR, M, theta, nu });
+            }
+            
+            // Propagate characteristics
+            let lastX = 0;
+            let lastY = TR;
+            let currentTheta = theta_max;
+            
+            for (let i = 1; i < numCharacteristics; i++) {
+                const curr = flowProperties[i];
+                
+                // Right-running characteristic (C^-)
+                const K_minus = curr.theta - curr.nu;
+                const mu = Math.asin(1 / curr.M);
+                const slope = Math.tan(curr.theta - mu);
+                
+                // Wall point calculation
+                const delta_x = targetLength > 0 ? targetLength / numCharacteristics : 2;
+                const x = lastX + delta_x;
+                const y = lastY + delta_x * Math.tan(Math.min(currentTheta, maxWallAngle));
+                
+                // Update flow properties
+                const newTheta = Math.max(0, currentTheta - delta_nu / 2);
+                currentTheta = newTheta;
+                lastX = x;
+                lastY = y;
+                
+                // Store point
+                points.push({ x, y, M: curr.M });
+            }
+            
+            // Add straight section
+            points.push({ x: lastX + 10, y: lastY, M: Me });
+            
+            return points;
+        }
+        
+        // Newton-Raphson solver for Prandtl-Meyer function
+        function newtonRaphson(f, x0, tolerance = 1e-6, maxIterations = 100) {
+            let x = x0;
+            for (let i = 0; i < maxIterations; i++) {
+                const fx = f(x);
+                const dfx = (f(x + 1e-6) - fx) / 1e-6; // Numerical derivative
+                const x_new = x - fx / dfx;
+                if (Math.abs(x_new - x) < tolerance) return x_new;
+                x = x_new;
+            }
+            return x;
+        }
+        
+        function updateContourTable(contourData) {
+            const tableBody = document.getElementById('contourData');
+            tableBody.innerHTML = '';
+            
+            contourData.forEach((point, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${point.x.toFixed(2)}</td>
+                    <td>${point.y.toFixed(2)}</td>
+                    <td>${point.M ? point.M.toFixed(2) : '-'}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+        
+        function plotNozzle(contourData) {
+            if (nozzleChart) {
+                nozzleChart.destroy();
+            }
+            
+            const xValues = contourData.map(p => p.x);
+            const yValues = contourData.map(p => p.y);
+            const machValues = contourData.map(p => p.M || 1);
+            const yValuesLower = yValues.map(y => -y);
+            
+            nozzleChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: xValues,
+                    datasets: [
+                        {
+                            label: 'Upper Contour',
+                            data: yValues,
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Lower Contour',
+                            data: yValuesLower,
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Mach Number',
+                            data: machValues,
+                            borderColor: '#2ecc71',
+                            borderWidth: 2,
+                            yAxisID: 'mach',
+                            fill: false,
+                            tension: 0.4
+                        }
+                    ]
                 },
-                {
-                    label: 'Lower Contour',
-                    data: yValuesLower,
-                    borderColor: '#e74c3c',
-                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Axial Distance (cm)'
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Axial Distance (cm)' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Radial Distance (cm)' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        mach: {
+                            position: 'right',
+                            title: { display: true, text: 'Mach Number' },
+                            min: 1,
+                            max: Math.max(...machValues) + 0.5,
+                            grid: { display: false }
+                        }
                     },
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
-                    }
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Radial Distance (cm)'
-                    },
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
-                    }
-                }
-            },
-            plugins: {
-                legend: {
-                    position: 'top',
-                },
-                title: {
-                    display: true,
-                    text: 'Convergent-Divergent Nozzle Contour'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return `${context.dataset.label}: (${context.parsed.x.toFixed(2)}, ${Math.abs(context.parsed.y).toFixed(2)}) cm`;
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Nozzle Contour and Mach Distribution' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label === 'Mach Number') {
+                                        return `Mach: ${context.parsed.y.toFixed(2)} at x=${context.parsed.x.toFixed(2)} cm`;
+                                    }
+                                    return `${context.dataset.label}: (${context.parsed.x.toFixed(2)}, ${Math.abs(context.parsed.y).toFixed(2)}) cm`;
+                                }
+                            }
                         }
                     }
                 }
-            }
+            });
         }
-    });
-}
-
-function exportContourData() {
-    const contourData = [];
-
-    // Get contour data from table
-    const rows = document.querySelectorAll('#contourData tr');
-    if (rows.length === 0 || rows[0].textContent.includes('No data')) {
-        showNotification('No contour data to export', 'error');
-        return;
-    }
-
-    // Create CSV content
-    let csvContent = "Point,X (cm),Y (cm)\n";
-
-    rows.forEach((row, index) => {
-        const cells = row.querySelectorAll('td');
-        const point = {
-            id: parseInt(cells[0].textContent),
-            x: parseFloat(cells[1].textContent),
-            y: parseFloat(cells[2].textContent)
-        };
-        contourData.push(point);
-        csvContent += `${point.id},${point.x.toFixed(2)},${point.y.toFixed(2)}\n`;
-    });
-
-    // Create download link
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', url);
-    link.setAttribute('download', 'nozzle_contour.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link');
-    link.click();
-    document.body.removeChild(link);
-    
-    showNotification('Contour data exported as CSV', 'success');
-}
-
-function exportAsImage() {
-    if (!nozzleChart) {
-        showNotification('No chart to export', 'error');
-        return;
-    }
-
-    const image = nozzleChart.toBase64Image();
-    const link = document.createElement('a');
-    link.href = image;
-    link.download = 'nozzle_contour.png';
-    document.body.appendChild(link');
-    link.click();
-    document.body.removeChild(link);
-    
-    showNotification('Nozzle contour exported as PNG', 'success');
-}
-
-function showNotification(message, type) {
-    const notification = document.getElementById('notification');
-    notification.textContent = message;
-    notification.className = `notification ${type} show`;
-    
-    setTimeout(() => {
-        notification.classList.remove('show');
-    }, 3000);
-}
+        
+        function exportContourData() {
+            const rows = document.querySelectorAll('#contourData tr');
+            if (rows.length === 0 || rows[0].textContent.includes('No data')) {
+                showNotification('No contour data to export', 'error');
+                return;
+            }
+            
+            let csvContent = "Point,X (cm),Y (cm),Mach\n";
+            rows.forEach((row, index) => {
+                const cells = row.querySelectorAll('td');
+                csvContent += `${cells[0].textContent},${cells[1].textContent},${cells[2].textContent},${cells[3].textContent}\n`;
+            });
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'nozzle_contour.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showNotification('Contour data exported as CSV', 'success');
+        }
+        
+        function exportAsImage() {
+            if (!nozzleChart) {
+                showNotification('No chart to export', 'error');
+                return;
+            }
+            
+            const image = nozzleChart.toBase64Image('image/png', 1);
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = 'nozzle_contour.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showNotification('Nozzle contour exported as PNG', 'success');
+        }
+        
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

@@ -352,6 +352,16 @@
                 </div>
                 
                 <div class="input-group">
+                    <label for="R_inlet">Inlet Radius (cm)</label>
+                    <input type="number" id="R_inlet" value="15" min="0.1" step="0.1">
+                </div>
+                
+                <div class="input-group">
+                    <label for="L_conv">Convergent Length (cm)</label>
+                    <input type="number" id="L_conv" value="10" min="0.1" step="0.1">
+                </div>
+                
+                <div class="input-group">
                     <label for="TR">Throat Radius (cm)</label>
                     <input type="number" id="TR" value="10" min="0.1" step="0.1">
                 </div>
@@ -399,6 +409,10 @@
                         <div id="mdotValue" class="result-value">-</div>
                     </div>
                     <div class="result-card">
+                        <div class="result-label">Throat Area (cm²)</div>
+                        <div id="A_throatValue" class="result-value">-</div>
+                    </div>
+                    <div class="result-card">
                         <div class="result-label">Thrust (N)</div>
                         <div id="ftValue" class="result-value">-</div>
                     </div>
@@ -413,7 +427,7 @@
                     <canvas id="machChart"></canvas>
                 </div>
                 
-                <!-- New Export Buttons for Mach Chart -->
+                <!-- Export Buttons for Mach Chart -->
                 <div class="export-options">
                     <button id="exportMachCSV" class="btn-outline">Export Mach Data (CSV)</button>
                     <button id="exportMachImage" class="btn-outline">Export Mach Chart as Image</button>
@@ -480,11 +494,11 @@
                 
                 <div class="tab-content" id="about-content">
                     <h3>Method of Characteristics Nozzle Design</h3>
-                    <p>This web application implements the Method of Characteristics (MOC) for designing optimal rocket nozzle contours. The MOC is a technique used in supersonic flow design to minimize energy losses and maximize thrust.</p>
+                    <p>This web application implements the Method of Characteristics (MOC) for designing optimal convergent-divergent rocket nozzle contours. The MOC is used for the supersonic divergent section, while the convergent section is modeled with a conical taper.</p>
                     
                     <h4>Key Features:</h4>
                     <ul style="margin-left: 20px; margin-top: 10px;">
-                        <li>Designs nozzles for specified combustion chamber conditions</li>
+                        <li>Designs full convergent-divergent nozzles</li>
                         <li>Calculates optimal contour for given altitude</li>
                         <li>Supports input by thrust or mass flow rate</li>
                         <li>Models atmospheric conditions based on altitude</li>
@@ -498,8 +512,8 @@
                     <ol style="margin-left: 20px; margin-top: 10px;">
                         <li>Determining ambient pressure at specified altitude</li>
                         <li>Calculating exit conditions (Mach number, velocity)</li>
-                        <li>Computing Prandtl-Meyer expansion angles</li>
-                        <li>Generating characteristic lines using MOC</li>
+                        <li>Generating a conical convergent section to the throat</li>
+                        <li>Using MOC to design the supersonic divergent section</li>
                         <li>Finding wall points to create the optimal contour</li>
                     </ol>
                 </div>
@@ -509,7 +523,7 @@
     
     <footer>
         <div class="container">
-            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft | Updated: Sunday, June 22, 2025, 11:12 AM +07</p>
+            <p>Nozzle Designer Web App | Method of Characteristics Implementation | by JFOX Aircraft | Updated: Sunday, June 22, 2025, 11:56 AM +07</p>
         </div>
     </footer>
     
@@ -563,6 +577,8 @@
             document.getElementById('ALT').value = '10000';
             document.getElementById('g').value = '1.2';
             document.getElementById('R').value = '355';
+            document.getElementById('R_inlet').value = '15';
+            document.getElementById('L_conv').value = '10';
             document.getElementById('TR').value = '10';
             document.getElementById('nozzleLength').value = '0';
             document.getElementById('maxWallAngle').value = '15';
@@ -572,6 +588,7 @@
             document.getElementById('meValue').textContent = '-';
             document.getElementById('veValue').textContent = '-';
             document.getElementById('mdotValue').textContent = '-';
+            document.getElementById('A_throatValue').textContent = '-';
             document.getElementById('ftValue').textContent = '-';
             document.getElementById('p0Value').textContent = '-';
             document.getElementById('t0Value').textContent = '-';
@@ -603,18 +620,24 @@
             const ALT = parseFloat(document.getElementById('ALT').value);
             const g = parseFloat(document.getElementById('g').value);
             const R = parseFloat(document.getElementById('R').value);
+            const R_inlet = parseFloat(document.getElementById('R_inlet').value);
+            const L_conv = parseFloat(document.getElementById('L_conv').value);
             const TR = parseFloat(document.getElementById('TR').value);
             const nozzleLength = parseFloat(document.getElementById('nozzleLength').value);
             const maxWallAngle = parseFloat(document.getElementById('maxWallAngle').value);
             const numCharacteristics = parseInt(document.getElementById('numCharacteristics').value);
             
             // Validate inputs
-            if ([p1, T1, ALT, g, R, TR, nozzleLength, maxWallAngle, numCharacteristics].some(isNaN)) {
+            if ([p1, T1, ALT, g, R, R_inlet, L_conv, TR, nozzleLength, maxWallAngle, numCharacteristics].some(isNaN)) {
                 showNotification('Please enter valid numbers for all parameters', 'error');
                 return;
             }
-            if (p1 <= 0 || T1 <= 0 || TR <= 0) {
-                showNotification('Pressure, temperature, and throat radius must be positive', 'error');
+            if (p1 <= 0 || T1 <= 0 || R_inlet <= 0 || L_conv <= 0 || TR <= 0) {
+                showNotification('Pressure, temperature, radii, and lengths must be positive', 'error');
+                return;
+            }
+            if (R_inlet < TR) {
+                showNotification('Inlet radius must be greater than or equal to throat radius', 'error');
                 return;
             }
             if (g < 1 || g > 2) {
@@ -655,7 +678,8 @@
             // Calculate exit velocity
             const v_e = Math.sqrt(TT * (1 - PR2));
             
-            // Calculate thrust or mass flow rate
+            // Calculate throat area and mass flow rate
+            const A_throat = Math.PI * TR * TR; // Area in cm²
             if (m_dot === 0) {
                 m_dot = FT / v_e;
             } else if (FT === 0) {
@@ -671,6 +695,7 @@
             document.getElementById('meValue').textContent = Me.toFixed(2);
             document.getElementById('veValue').textContent = Math.round(v_e);
             document.getElementById('mdotValue').textContent = m_dot.toFixed(2);
+            document.getElementById('A_throatValue').textContent = A_throat.toFixed(2);
             document.getElementById('ftValue').textContent = Math.round(FT);
             document.getElementById('p0Value').textContent = Math.round(p_o);
             document.getElementById('t0Value').textContent = T_amb.toFixed(2);
@@ -678,7 +703,7 @@
             document.getElementById('teValue').textContent = Math.round(T_e);
             
             // Generate nozzle contour
-            const contourData = generateNozzleContour(Me, g, T1, TR);
+            const contourData = generateNozzleContour(Me, g, T1, R_inlet, L_conv, TR);
             
             // Update data table
             updateContourTable(contourData);
@@ -689,7 +714,7 @@
             showNotification('Nozzle design completed successfully!', 'success');
         }
         
-        function generateNozzleContour(Me, g, T1, TR) {
+        function generateNozzleContour(Me, g, T1, R_inlet, L_conv, TR) {
             const RTOD = 180 / Math.PI;
             const DTOR = Math.PI / 180;
             const numCharacteristics = parseInt(document.getElementById('numCharacteristics').value);
@@ -706,44 +731,49 @@
             const theta_max = 0.5 * v_max; // Half-angle for symmetric nozzle
             
             // Initialize points
-            const points = [{ x: 0, y: TR, M: 1 }]; // Throat point
-            const flowProperties = [{ x: 0, y: TR, M: 1, theta: 0, nu: 0 }];
+            const points = [];
             
-            // Initial expansion fan
+            // Generate convergent section (linear taper from R_inlet to TR over L_conv)
+            const numConvPoints = 20; // Number of points for convergent section
+            for (let i = 0; i <= numConvPoints; i++) {
+                const x = -L_conv + (i * L_conv) / numConvPoints;
+                const y = R_inlet + (TR - R_inlet) * (i / numConvPoints);
+                points.push({ x, y, M: 1 - 0.05 * (i / numConvPoints) }); // Approximate subsonic to sonic transition
+            }
+            
+            // Throat point (x = 0, y = TR, M = 1)
+            points.push({ x: 0, y: TR, M: 1 });
+            
+            // Generate divergent section using MOC
+            const flowProperties = [{ x: 0, y: TR, M: 1, theta: 0, nu: 0 }];
             const delta_nu = v_max / numCharacteristics;
             for (let i = 1; i <= numCharacteristics; i++) {
                 const nu = i * delta_nu;
-                const M = newtonRaphson(M => v_PM(M) - nu, 1.1); // Solve for Mach number
-                const theta = nu / 2; // Simplified linear turning
+                const M = newtonRaphson(M => v_PM(M) - nu, 1.1);
+                const theta = nu / 2;
                 const mu = Math.asin(1 / M);
                 flowProperties.push({ x: 0, y: TR, M, theta, nu });
             }
             
-            // Propagate characteristics
             let lastX = 0;
             let lastY = TR;
             let currentTheta = theta_max;
             
             for (let i = 1; i < numCharacteristics; i++) {
                 const curr = flowProperties[i];
-                
-                // Right-running characteristic (C^-)
                 const K_minus = curr.theta - curr.nu;
                 const mu = Math.asin(1 / curr.M);
                 const slope = Math.tan(curr.theta - mu);
                 
-                // Wall point calculation
                 const delta_x = targetLength > 0 ? targetLength / numCharacteristics : 2;
                 const x = lastX + delta_x;
                 const y = lastY + delta_x * Math.tan(Math.min(currentTheta, maxWallAngle));
                 
-                // Update flow properties
                 const newTheta = Math.max(0, currentTheta - delta_nu / 2);
                 currentTheta = newTheta;
                 lastX = x;
                 lastY = y;
                 
-                // Store point
                 points.push({ x, y, M: curr.M });
             }
             
@@ -758,7 +788,7 @@
             let x = x0;
             for (let i = 0; i < maxIterations; i++) {
                 const fx = f(x);
-                const dfx = (f(x + 1e-6) - fx) / 1e-6; // Numerical derivative
+                const dfx = (f(x + 1e-6) - fx) / 1e-6;
                 const x_new = x - fx / dfx;
                 if (Math.abs(x_new - x) < tolerance) return x_new;
                 x = x_new;
@@ -809,7 +839,7 @@
                             borderColor: '#3498db',
                             backgroundColor: 'rgba(52, 152, 219, 0.1)',
                             borderWidth: 2,
-                            fill: true,
+                            fill: false,
                             tension: 0.4
                         },
                         {
@@ -818,7 +848,7 @@
                             borderColor: '#e74c3c',
                             backgroundColor: 'rgba(231, 76, 60, 0.1)',
                             borderWidth: 2,
-                            fill: true,
+                            fill: false,
                             tension: 0.4
                         }
                     ]
@@ -838,7 +868,7 @@
                     },
                     plugins: {
                         legend: { position: 'top' },
-                        title: { display: true, text: 'Nozzle Contour' },
+                        title: { display: true, text: 'Convergent-Divergent Nozzle Contour' },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
@@ -876,7 +906,7 @@
                         },
                         y: {
                             title: { display: true, text: 'Mach Number' },
-                            min: 1,
+                            min: 0,
                             max: Math.max(...machValues) + 0.5,
                             grid: { color: 'rgba(0, 0, 0, 0.05)' }
                         }
@@ -957,7 +987,6 @@
                 filename = 'mach_distribution.png';
             }
             
-            // Ensure chart is fully rendered before export
             chart.update();
             const image = chart.toBase64Image('image/png', 1.0);
             const link = document.createElement('a');

@@ -167,6 +167,11 @@
             margin-top: 1rem;
         }
         
+        .mach-chart-container {
+            height: 300px;
+            margin-top: 2rem;
+        }
+        
         .results-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -397,6 +402,10 @@
                     <button id="exportCSV" class="btn-outline">Export Contour Data (CSV)</button>
                     <button id="exportPNG" class="btn-outline">Export as Image</button>
                 </div>
+                
+                <div class="mach-chart-container">
+                    <canvas id="machChart"></canvas>
+                </div>
             </div>
         </div>
         
@@ -467,7 +476,7 @@
                     <li>Calculates optimal contour for given altitude</li>
                     <li>Supports input by thrust or mass flow rate</li>
                     <li>Models atmospheric conditions based on altitude</li>
-                    <li>Includes Mach number distribution visualization</li>
+                    <li>Includes separate Mach number distribution visualization</li>
                     <li>Supports customizable nozzle length and wall angle constraints</li>
                     <li>Exports contour data for further analysis</li>
                 </ul>
@@ -501,9 +510,11 @@
         const exportPNG = document.getElementById('exportPNG');
         const tabs = document.querySelectorAll('.tab');
         
-        // Initialize Chart
-        const ctx = document.getElementById('nozzleChart').getContext('2d');
+        // Initialize Charts
+        const nozzleCtx = document.getElementById('nozzleChart').getContext('2d');
+        const machCtx = document.getElementById('machChart').getContext('2d');
         let nozzleChart;
+        let machChart;
         
         // Initialize with default values
         resetToDefaults();
@@ -550,9 +561,14 @@
             document.getElementById('prValue').textContent = '-';
             document.getElementById('teValue').textContent = '-';
             
-            // Clear chart if exists
+            // Clear charts if they exist
             if (nozzleChart) {
                 nozzleChart.destroy();
+                nozzleChart = null;
+            }
+            if (machChart) {
+                machChart.destroy();
+                machChart = null;
             }
             
             // Clear data table
@@ -650,7 +666,7 @@
             // Update data table
             updateContourTable(contourData);
             
-            // Plot nozzle
+            // Plot nozzle and Mach number
             plotNozzle(contourData);
             
             showNotification('Nozzle design completed successfully!', 'success');
@@ -750,16 +766,22 @@
         }
         
         function plotNozzle(contourData) {
+            // Destroy existing charts if they exist
             if (nozzleChart) {
                 nozzleChart.destroy();
             }
+            if (machChart) {
+                machChart.destroy();
+            }
             
+            // Extract data
             const xValues = contourData.map(p => p.x);
             const yValues = contourData.map(p => p.y);
             const machValues = contourData.map(p => p.M || 1);
             const yValuesLower = yValues.map(y => -y);
             
-            nozzleChart = new Chart(ctx, {
+            // Create nozzle contour chart
+            nozzleChart = new Chart(nozzleCtx, {
                 type: 'line',
                 data: {
                     labels: xValues,
@@ -781,15 +803,6 @@
                             borderWidth: 2,
                             fill: true,
                             tension: 0.4
-                        },
-                        {
-                            label: 'Mach Number',
-                            data: machValues,
-                            borderColor: '#2ecc71',
-                            borderWidth: 2,
-                            yAxisID: 'mach',
-                            fill: false,
-                            tension: 0.4
                         }
                     ]
                 },
@@ -804,25 +817,60 @@
                         y: {
                             title: { display: true, text: 'Radial Distance (cm)' },
                             grid: { color: 'rgba(0, 0, 0, 0.05)' }
-                        },
-                        mach: {
-                            position: 'right',
-                            title: { display: true, text: 'Mach Number' },
-                            min: 1,
-                            max: Math.max(...machValues) + 0.5,
-                            grid: { display: false }
                         }
                     },
                     plugins: {
                         legend: { position: 'top' },
-                        title: { display: true, text: 'Nozzle Contour and Mach Distribution' },
+                        title: { display: true, text: 'Nozzle Contour' },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    if (context.dataset.label === 'Mach Number') {
-                                        return `Mach: ${context.parsed.y.toFixed(2)} at x=${context.parsed.x.toFixed(2)} cm`;
-                                    }
                                     return `${context.dataset.label}: (${context.parsed.x.toFixed(2)}, ${Math.abs(context.parsed.y).toFixed(2)}) cm`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Create Mach number chart
+            machChart = new Chart(machCtx, {
+                type: 'line',
+                data: {
+                    labels: xValues,
+                    datasets: [
+                        {
+                            label: 'Mach Number',
+                            data: machValues,
+                            borderColor: '#2ecc71',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Axial Distance (cm)' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Mach Number' },
+                            min: 1,
+                            max: Math.max(...machValues) + 0.5,
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Mach Number Distribution' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Mach: ${context.parsed.y.toFixed(2)} at x=${context.parsed.x.toFixed(2)} cm`;
                                 }
                             }
                         }
@@ -858,20 +906,35 @@
         }
         
         function exportAsImage() {
-            if (!nozzleChart) {
-                showNotification('No chart to export', 'error');
+            if (!nozzleChart && !machChart) {
+                showNotification('No charts to export', 'error');
                 return;
             }
             
-            const image = nozzleChart.toBase64Image('image/png', 1);
+            // Prompt user to choose which chart to export
+            const choice = prompt('Enter "contour" to export the nozzle contour or "mach" to export the Mach number chart:').toLowerCase();
+            
+            let chart, filename;
+            if (choice === 'contour' && nozzleChart) {
+                chart = nozzleChart;
+                filename = 'nozzle_contour.png';
+            } else if (choice === 'mach' && machChart) {
+                chart = machChart;
+                filename = 'mach_distribution.png';
+            } else {
+                showNotification('Invalid choice or chart not available', 'error');
+                return;
+            }
+            
+            const image = chart.toBase64Image('image/png', 1);
             const link = document.createElement('a');
             link.href = image;
-            link.download = 'nozzle_contour.png';
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             
-            showNotification('Nozzle contour exported as PNG', 'success');
+            showNotification(`${choice === 'contour' ? 'Nozzle contour' : 'Mach number chart'} exported as PNG`, 'success');
         }
         
         function showNotification(message, type) {

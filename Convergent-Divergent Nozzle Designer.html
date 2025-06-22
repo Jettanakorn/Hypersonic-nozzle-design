@@ -57,15 +57,20 @@
             margin: 0 auto;
         }
         
-        .content {
+        .main-content {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-areas:
+                "input output"
+                "tabs tabs";
             gap: 2rem;
         }
         
         @media (max-width: 900px) {
-            .content {
-                grid-template-columns: 1fr;
+            .main-content {
+                grid-template-areas:
+                    "input"
+                    "output"
+                    "tabs";
             }
         }
         
@@ -205,7 +210,8 @@
         }
         
         .tab-container {
-            margin-top: 1.5rem;
+            grid-area: tabs;
+            margin-top: 2rem;
         }
         
         .tabs {
@@ -305,9 +311,9 @@
     </header>
     
     <div class="container">
-        <div class="content">
+        <div class="main-content">
             <!-- Input Panel -->
-            <div class="card">
+            <div class="card" style="grid-area: input;">
                 <h2 class="card-title">Design Parameters</h2>
                 
                 <div class="input-group">
@@ -372,7 +378,7 @@
             </div>
             
             <!-- Output Panel -->
-            <div class="card">
+            <div class="card" style="grid-area: output;">
                 <h2 class="card-title">Nozzle Visualization</h2>
                 
                 <div class="chart-container">
@@ -407,89 +413,90 @@
                     <canvas id="machChart"></canvas>
                 </div>
             </div>
-        </div>
-        
-        <div class="card tab-container">
-            <div class="tabs">
-                <div class="tab active" data-tab="contour">Nozzle Contour Data</div>
-                <div class="tab" data-tab="atm">Atmospheric Conditions</div>
-                <div class="tab" data-tab="about">About</div>
-            </div>
             
-            <div class="tab-content active" id="contour-content">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Point #</th>
-                            <th>X Position (cm)</th>
-                            <th>Y Position (cm)</th>
-                            <th>Mach Number</th>
-                        </tr>
-                    </thead>
-                    <tbody id="contourData">
-                        <tr><td colspan="4" style="text-align:center">No data available. Run calculation first.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="tab-content" id="atm-content">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Parameter</th>
-                            <th>Value</th>
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Ambient Pressure (Pa)</td>
-                            <td id="p0Value">-</td>
-                            <td>Atmospheric pressure at specified altitude</td>
-                        </tr>
-                        <tr>
-                            <td>Ambient Temperature (°C)</td>
-                            <td id="t0Value">-</td>
-                            <td>Atmospheric temperature at specified altitude</td>
-                        </tr>
-                        <tr>
-                            <td>Pressure Ratio</td>
-                            <td id="prValue">-</td>
-                            <td>p<sub>o</sub>/p<sub>1</sub></td>
-                        </tr>
-                        <tr>
-                            <td>Exit Temperature (K)</td>
-                            <td id="teValue">-</td>
-                            <td>Temperature at nozzle exit</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="tab-content" id="about-content">
-                <h3>Method of Characteristics Nozzle Design</h3>
-                <p>This web application implements the Method of Characteristics (MOC) for designing optimal rocket nozzle contours. The MOC is a technique used in supersonic flow design to minimize energy losses and maximize thrust.</p>
+            <!-- Tab Container -->
+            <div class="card tab-container">
+                <div class="tabs">
+                    <div class="tab active" data-tab="contour">Nozzle Contour Data</div>
+                    <div class="tab" data-tab="atm">Atmospheric Conditions</div>
+                    <div class="tab" data-tab="about">About</div>
+                </div>
                 
-                <h4>Key Features:</h4>
-                <ul style="margin-left: 20px; margin-top: 10px;">
-                    <li>Designs nozzles for specified combustion chamber conditions</li>
-                    <li>Calculates optimal contour for given altitude</li>
-                    <li>Supports input by thrust or mass flow rate</li>
-                    <li>Models atmospheric conditions based on altitude</li>
-                    <li>Includes separate Mach number distribution visualization</li>
-                    <li>Supports customizable nozzle length and wall angle constraints</li>
-                    <li>Exports contour data for further analysis</li>
-                </ul>
+                <div class="tab-content active" id="contour-content">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Point #</th>
+                                <th>X Position (cm)</th>
+                                <th>Y Position (cm)</th>
+                                <th>Mach Number</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contourData">
+                            <tr><td colspan="4" style="text-align:center">No data available. Run calculation first.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
                 
-                <h4>How it Works:</h4>
-                <p>The algorithm calculates the nozzle contour by:</p>
-                <ol style="margin-left: 20px; margin-top: 10px;">
-                    <li>Determining ambient pressure at specified altitude</li>
-                    <li>Calculating exit conditions (Mach number, velocity)</li>
-                    <li>Computing Prandtl-Meyer expansion angles</li>
-                    <li>Generating characteristic lines using MOC</li>
-                    <li>Finding wall points to create the optimal contour</li>
-                </ol>
+                <div class="tab-content" id="atm-content">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>Value</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Ambient Pressure (Pa)</td>
+                                <td id="p0Value">-</td>
+                                <td>Atmospheric pressure at specified altitude</td>
+                            </tr>
+                            <tr>
+                                <td>Ambient Temperature (°C)</td>
+                                <td id="t0Value">-</td>
+                                <td>Atmospheric temperature at specified altitude</td>
+                            </tr>
+                            <tr>
+                                <td>Pressure Ratio</td>
+                                <td id="prValue">-</td>
+                                <td>p<sub>o</sub>/p<sub>1</sub></td>
+                            </tr>
+                            <tr>
+                                <td>Exit Temperature (K)</td>
+                                <td id="teValue">-</td>
+                                <td>Temperature at nozzle exit</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="tab-content" id="about-content">
+                    <h3>Method of Characteristics Nozzle Design</h3>
+                    <p>This web application implements the Method of Characteristics (MOC) for designing optimal rocket nozzle contours. The MOC is a technique used in supersonic flow design to minimize energy losses and maximize thrust.</p>
+                    
+                    <h4>Key Features:</h4>
+                    <ul style="margin-left: 20px; margin-top: 10px;">
+                        <li>Designs nozzles for specified combustion chamber conditions</li>
+                        <li>Calculates optimal contour for given altitude</li>
+                        <li>Supports input by thrust or mass flow rate</li>
+                        <li>Models atmospheric conditions based on altitude</li>
+                        <li>Includes separate Mach number distribution visualization</li>
+                        <li>Supports customizable nozzle length and wall angle constraints</li>
+                        <li>Exports contour data for further analysis</li>
+                    </ul>
+                    
+                    <h4>How it Works:</h4>
+                    <p>The algorithm calculates the nozzle contour by:</p>
+                    <ol style="margin-left: 20px; margin-top: 10px;">
+                        <li>Determining ambient pressure at specified altitude</li>
+                        <li>Calculating exit conditions (Mach number, velocity)</li>
+                        <li>Computing Prandtl-Meyer expansion angles</li>
+                        <li>Generating characteristic lines using MOC</li>
+                        <li>Finding wall points to create the optimal contour</li>
+                    </ol>
+                </div>
             </div>
         </div>
     </div>
